@@ -539,12 +539,21 @@ start_server {tags {"scripting"}} {
                 local b = {x=a}
                 a['x'] = b
                 local encoded = cmsgpack.pack(a)
+                local valid = {"82a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a178c0",
+                               "82a17881a17882a17881a17882a17881a17882a17881a17882a17881a17882a17881a17882a17881a17882a17881a178c0a17905a17905a17905a17905a17905a17905a17905a17905"}
                 local h = ""
                 -- cmsgpack encodes to a depth of 16, but can't encode
                 -- references, so the encoded object has a deep copy recursive
                 -- depth of 16.
                 for i = 1, #encoded do
                     h = h .. string.format("%02x",string.byte(encoded,i))
+                end
+                local match_valid = 0
+                for index, value in ipairs(valid) do
+                   if h == value then
+                       match_valid = 1
+                       break
+                   end
                 end
                 -- when unpacked, re.x.x != re because the unpack creates
                 -- individual tables down to a depth of 16.
@@ -562,9 +571,9 @@ start_server {tags {"scripting"}} {
                 assert(re.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x)
                 -- so, the final x.x is at the depth limit and was assigned nil
                 assert(re.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x == nil)
-                return {h, re.x.x.x.x.x.x.x.x.y == re.y, re.y == 5}
+                return {match_valid, re.x.x.x.x.x.x.x.x.y == re.y, re.y == 5}
         } 0
-    } {82a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a17882a17905a17881a178c0 1 1}
+    } {1 1 1}
 
     test {EVAL - Numerical sanity check from bitop} {
         run_script {assert(0x7fffffff == 2147483647, "broken hex literals");
@@ -737,7 +746,7 @@ start_server {tags {"scripting"}} {
         set res [run_script {return bit.tohex(65535, -2147483648)} 0]
         r ping
         set res
-    } {0000FFFF}
+    } {0*FFFF}
 
     test {Test an example script DECR_IF_GT} {
         set decr_if_gt {

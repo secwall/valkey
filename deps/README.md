@@ -96,6 +96,12 @@ and our version:
 3. There is a security fix in `ldo.c`, line 498: The check for `LUA_SIGNATURE[0]` is removed in order to avoid direct bytecode execution.
 4. In `lstring.c`, the luaS_newlstr function's hash calculation has been upgraded from a simple hash function to MurmurHash3, implemented within the same file, to enhance performance, particularly for operations involving large strings.
 
+LuaJIT
+------
+
+LuaJIT is not vendored. Patches are stored in `luajit-patches`.
+Commit hash to checkout is in Makefile (`LUAJIT_GIT_COMMIT_HASH`).
+
 Hdr_Histogram
 ---
 

@@ -1,0 +1,17 @@
+diff --git a/src/lj_err.c b/src/lj_err.c
+index b0ceaa2f..1f643c9c 100644
+--- a/src/lj_err.c
++++ b/src/lj_err.c
+@@ -195,9 +195,6 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
+     L->base = tvref(L->stack)+1+LJ_FR2;
+     L->cframe = NULL;
+     unwindstack(L, L->base);
+-    if (G(L)->panic)
+-      G(L)->panic(L);
+-    exit(EXIT_FAILURE);
+   }
+   return L;  /* Anything non-NULL will do. */
+ }
+-- 
+2.47.0
+

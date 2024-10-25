@@ -226,10 +226,10 @@ start_server {tags {"pause network"}} {
 
     test "Test may-replicate commands are rejected in RO scripts" {
         # that's specifically important for CLIENT PAUSE WRITE
-        assert_error {ERR Write commands are not allowed from read-only scripts. script:*} {
+        assert_error {ERR Write commands are not allowed from read-only scripts*} {
             r EVAL_RO "return redis.call('publish','ch','msg')" 0
         }
-        assert_error {ERR Write commands are not allowed from read-only scripts. script:*} {
+        assert_error {ERR Write commands are not allowed from read-only scripts*} {
             r EVAL {#!lua flags=no-writes
                 return redis.call('publish','ch','msg')
             } 0

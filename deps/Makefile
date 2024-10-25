@@ -39,6 +39,7 @@ distclean:
 	-(cd hiredis && $(MAKE) clean) > /dev/null || true
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
+	-(rm -rf luajit) > /dev/null || true
 	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
 	-(cd hdr_histogram && $(MAKE) clean) > /dev/null || true
 	-(cd fpconv && $(MAKE) clean) > /dev/null || true
@@ -102,6 +103,30 @@ lua: .make-prerequisites
 	cd lua/src && $(MAKE) all CFLAGS="$(LUA_CFLAGS)" MYLDFLAGS="$(LUA_LDFLAGS)" AR="$(AR) $(ARFLAGS)"
 
 .PHONY: lua
+
+LUAJIT_GIT_COMMIT_HASH=87ae18af
+
+luajit: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	@if [ ! -d luajit ]; then \
+		if [ "$(LUAJIT_SOURCE_PATH)" = "" ]; then \
+			git clone https://luajit.org/git/luajit.git luajit && \
+			(cd luajit && git checkout $(LUAJIT_GIT_COMMIT_HASH)); \
+		else \
+			cp -r $(LUAJIT_SOURCE_PATH) luajit; \
+		fi; \
+	fi
+	@for i in $(shell ls luajit-patches | sort); do \
+		echo "Applying patch $$i on luajit source code"; \
+			if (cd luajit && git apply --reverse --check ../luajit-patches/$$i >/dev/null 2>&1); then \
+				echo "$$i already applied"; \
+			else \
+				(cd luajit && git apply ../luajit-patches/$$i) || exit 1; \
+			fi; \
+	done
+	cd luajit/src && $(MAKE) all CFLAGS="$(LUA_CFLAGS)" MYLDFLAGS="$(LUA_LDFLAGS)" AR="$(AR) $(ARFLAGS)"
+
+.PHONY: luajit
 
 JEMALLOC_CFLAGS=$(CFLAGS)
 JEMALLOC_LDFLAGS=$(LDFLAGS)

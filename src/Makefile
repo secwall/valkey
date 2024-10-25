@@ -4,7 +4,7 @@
 #
 # The Makefile composes the final FINAL_CFLAGS and FINAL_LDFLAGS using
 # what is needed for Valkey plus the standard CFLAGS and LDFLAGS passed.
-# However when building the dependencies (Jemalloc, Lua, Hiredis, ...)
+# However when building the dependencies (Jemalloc, Lua, Luajit, Hiredis, ...)
 # CFLAGS and LDFLAGS are propagated to the dependencies, so to pass
 # flags only to be used when compiling / linking Valkey itself SERVER_CFLAGS
 # and SERVER_LDFLAGS are used instead (this is the case of 'make gcov').
@@ -31,7 +31,14 @@ endif
 ifneq ($(OPTIMIZATION),-O0)
 	OPTIMIZATION+=-fno-omit-frame-pointer
 endif
-DEPENDENCY_TARGETS=hiredis linenoise lua hdr_histogram fpconv
+BASE_LUA_NAME=lua
+ifeq ($(USE_LUAJIT),yes)
+	UNAME_P := $(shell uname -p)
+	ifeq ($(UNAME_P),$(filter $(UNAME_P), aarch64 x86_64))
+		BASE_LUA_NAME=luajit
+	endif
+endif
+DEPENDENCY_TARGETS=hiredis linenoise $(BASE_LUA_NAME) hdr_histogram fpconv
 NODEPS:=clean distclean
 
 # Default settings
@@ -257,7 +264,7 @@ ifdef OPENSSL_PREFIX
 endif
 
 # Include paths to dependencies
-FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/lua/src -I../deps/hdr_histogram -I../deps/fpconv
+FINAL_CFLAGS+= -I../deps/hiredis -I../deps/linenoise -I../deps/$(BASE_LUA_NAME)/src -I../deps/hdr_histogram -I../deps/fpconv
 
 # Determine systemd support and/or build preference (defaulting to auto-detection)
 BUILD_WITH_SYSTEMD=no
@@ -467,6 +474,7 @@ persist-settings: distclean
 	echo SERVER_LDFLAGS=$(SERVER_LDFLAGS) >> .make-settings
 	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> .make-settings
 	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> .make-settings
+	echo USE_LUAJIT=$(USE_LUAJIT) >> .make-settings
 	-(cd ../deps && $(MAKE) $(DEPENDENCY_TARGETS))
 
 .PHONY: persist-settings
@@ -486,7 +494,7 @@ endif
 
 # valkey-server
 $(SERVER_NAME): $(ENGINE_SERVER_OBJ)
-	$(SERVER_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a $(FINAL_LIBS)
+	$(SERVER_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/$(BASE_LUA_NAME)/src/lib$(BASE_LUA_NAME).a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a $(FINAL_LIBS)
 
 # Valkey static library, used to compile against for unit testing
 $(ENGINE_LIB_NAME): $(ENGINE_SERVER_OBJ)
@@ -494,7 +502,7 @@ $(ENGINE_LIB_NAME): $(ENGINE_SERVER_OBJ)
 
 # valkey-unit-tests
 $(ENGINE_UNIT_TESTS): $(ENGINE_TEST_OBJ) $(ENGINE_LIB_NAME)
-	$(SERVER_LD) $(ALLOW_DUPLICATE_FLAG) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a $(FINAL_LIBS)
+	$(SERVER_LD) $(ALLOW_DUPLICATE_FLAG) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/$(BASE_LUA_NAME)/src/lib$(BASE_LUA_NAME).a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a $(FINAL_LIBS)
 
 # valkey-sentinel
 $(ENGINE_SENTINEL_NAME): $(SERVER_NAME)

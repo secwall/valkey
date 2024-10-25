@@ -1,0 +1,290 @@
+diff --git a/src/lj_api.c b/src/lj_api.c
+index 1ad71678..7e62b650 100644
+--- a/src/lj_api.c
++++ b/src/lj_api.c
+@@ -6,6 +6,7 @@
+ ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
+ */
+ 
++#include "lua.h"
+ #define lj_api_c
+ #define LUA_CORE
+ 
+@@ -968,6 +969,9 @@ LUA_API void lua_settable(lua_State *L, int idx)
+ {
+   TValue *o;
+   cTValue *t = index2adr_check(L, idx);
++  if (lua_istable(L, idx) && tabV(t)->readonly) {
++    lj_tab_readonly(L);
++  }
+   lj_checkapi_slot(2);
+   o = lj_meta_tset(L, t, L->top-2);
+   if (o) {
+@@ -1006,6 +1010,9 @@ LUA_API void lua_setfield(lua_State *L, int idx, const char *k)
+ LUA_API void lua_rawset(lua_State *L, int idx)
+ {
+   GCtab *t = tabV(index2adr(L, idx));
++  if (t->readonly) {
++    lj_tab_readonly(L);
++  }
+   TValue *dst, *key;
+   lj_checkapi_slot(2);
+   key = L->top-2;
+@@ -1018,6 +1025,9 @@ LUA_API void lua_rawset(lua_State *L, int idx)
+ LUA_API void lua_rawseti(lua_State *L, int idx, int n)
+ {
+   GCtab *t = tabV(index2adr(L, idx));
++  if (t->readonly) {
++    lj_tab_readonly(L);
++  }
+   TValue *dst, *src;
+   lj_checkapi_slot(1);
+   dst = lj_tab_setint(L, t, n);
+@@ -1041,6 +1051,9 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
+   }
+   g = G(L);
+   if (tvistab(o)) {
++    if (tabV(o)->readonly) {
++      lj_tab_readonly(L);
++    }
+     setgcref(tabV(o)->metatable, obj2gco(mt));
+     if (mt)
+       lj_gc_objbarriert(L, tabV(o), mt);
+@@ -1110,6 +1123,24 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
+   return name;
+ }
+ 
++LUA_API void lua_enablereadonlytable (lua_State *L, int objindex, int enabled) {
++  const TValue* o = index2adr(L, objindex);
++  if (!lua_istable(L, objindex)) {
++      lj_err_msg(L, LJ_ERR_NOTABLE);
++  }
++  GCtab *t = tabV(o);
++  t->readonly = enabled;
++}
++
++LUA_API int lua_isreadonlytable (lua_State *L, int objindex) {
++  const TValue* o = index2adr(L, objindex);
++  if (!lua_istable(L, objindex)) {
++      lj_err_msg(L, LJ_ERR_NOTABLE);
++  }
++  GCtab *t = tabV(o);
++  return t->readonly;
++}
++
+ /* -- Calls --------------------------------------------------------------- */
+ 
+ #if LJ_FR2
+diff --git a/src/lj_errmsg.h b/src/lj_errmsg.h
+index 109e909c..53965b3b 100644
+--- a/src/lj_errmsg.h
++++ b/src/lj_errmsg.h
+@@ -22,6 +22,9 @@ ERRDEF(NANIDX,	"table index is NaN")
+ ERRDEF(NILIDX,	"table index is nil")
+ ERRDEF(NEXTIDX,	"invalid key to " LUA_QL("next"))
+ 
++ERRDEF(ROTABLE,	"Attempt to modify a readonly table")
++ERRDEF(NOTABLE,	"Table expected")
++
+ /* Metamethod resolving. */
+ ERRDEF(BADCALL,	"attempt to call a %s value")
+ ERRDEF(BADOPRT,	"attempt to %s %s " LUA_QS " (a %s value)")
+diff --git a/src/lj_obj.h b/src/lj_obj.h
+index d8b69641..cff20268 100644
+--- a/src/lj_obj.h
++++ b/src/lj_obj.h
+@@ -505,6 +505,7 @@ typedef struct GCtab {
+   MRef node;		/* Hash part. */
+   uint32_t asize;	/* Size of array part (keys [0, asize-1]). */
+   uint32_t hmask;	/* Hash part mask (size of hash part - 1). */
++  int readonly;
+ #if LJ_GC64
+   MRef freetop;		/* Top of free elements. */
+ #endif
+diff --git a/src/lj_tab.c b/src/lj_tab.c
+index 535a69f5..b4d30224 100644
+--- a/src/lj_tab.c
++++ b/src/lj_tab.c
+@@ -14,6 +14,12 @@
+ #include "lj_err.h"
+ #include "lj_tab.h"
+ 
++/* -- Read-only table helper ---------------------------------------------- */
++
++void LJ_FASTCALL lj_tab_readonly(lua_State *L) {
++  lj_err_msg(L, LJ_ERR_ROTABLE);
++}
++
+ /* -- Object hashing ------------------------------------------------------ */
+ 
+ /* Hash an arbitrary key and return its anchor position in the hash table. */
+@@ -93,6 +99,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
+     setgcrefnull(t->metatable);
+     t->asize = asize;
+     t->hmask = 0;
++    t->readonly = 0;
+     nilnode = &G(L)->nilnode;
+     setmref(t->node, nilnode);
+ #if LJ_GC64
+@@ -108,6 +115,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
+     setgcrefnull(t->metatable);
+     t->asize = 0;  /* In case the array allocation fails. */
+     t->hmask = 0;
++    t->readonly = 0;
+     nilnode = &G(L)->nilnode;
+     setmref(t->node, nilnode);
+ #if LJ_GC64
+@@ -434,6 +442,10 @@ cTValue *lj_tab_get(lua_State *L, GCtab *t, cTValue *key)
+ /* Insert new key. Use Brent's variation to optimize the chain length. */
+ TValue *lj_tab_newkey(lua_State *L, GCtab *t, cTValue *key)
+ {
++  if (LJ_UNLIKELY(t->readonly)) {
++    lj_tab_readonly(L);
++    return NULL;
++  }
+   Node *n = hashkey(t, key);
+   if (!tvisnil(&n->val) || t->hmask == 0) {
+     Node *nodebase = noderef(t->node);
+diff --git a/src/lj_tab.h b/src/lj_tab.h
+index 9c03fa16..ce71eabe 100644
+--- a/src/lj_tab.h
++++ b/src/lj_tab.h
+@@ -31,6 +31,8 @@ static LJ_AINLINE uint32_t hashrot(uint32_t lo, uint32_t hi)
+   return hi;
+ }
+ 
++void LJ_FASTCALL lj_tab_readonly(lua_State *L);
++
+ /* Hash values are masked with the table hash mask and used as an index. */
+ static LJ_AINLINE Node *hashmask(const GCtab *t, uint32_t hash)
+ {
+diff --git a/src/lua.h b/src/lua.h
+index 6d1634d1..87d006fd 100644
+--- a/src/lua.h
++++ b/src/lua.h
+@@ -356,6 +356,8 @@ LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
+ /* From Lua 5.3. */
+ LUA_API int lua_isyieldable (lua_State *L);
+ 
++LUA_API void lua_enablereadonlytable (lua_State *L, int index, int enabled);
++LUA_API int lua_isreadonlytable (lua_State *L, int objindex);
+ 
+ struct lua_Debug {
+   int event;
+diff --git a/src/vm_x64.dasc b/src/vm_x64.dasc
+index b8ecb868..df1a6811 100644
+--- a/src/vm_x64.dasc
++++ b/src/vm_x64.dasc
+@@ -288,6 +288,12 @@
+ |.macro checktab, reg, target; checktp reg, LJ_TTAB, target; .endmacro
+ |.macro checkfunc, reg, target; checktp reg, LJ_TFUNC, target; .endmacro
+ |
++|.macro checkrotab, flag, target
++|  mov TMPRd, flag
++|  cmp TMPRd, 0
++|  jne target
++|.endmacro
++|
+ |.macro checknumx, reg, target, jump
+ |  mov ITYPE, reg
+ |  sar ITYPE, 47
+@@ -1258,6 +1264,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |  mov TAB:RB, [BASE]
+   |  mov TAB:TMPR, TAB:RB
+   |  checktab TAB:RB, ->fff_fallback
++  |  checkrotab TAB:RB->readonly, ->ro_tab_error
+   |  // Fast path: no mt for table yet and not clearing the mt.
+   |  cmp aword TAB:RB->metatable, 0; jne ->fff_fallback
+   |  mov TAB:RA, [BASE+8]
+@@ -2676,6 +2683,15 @@ static void build_subroutines(BuildCtx *ctx)
+   |.endif
+   |
+   |//-----------------------------------------------------------------------
++  |//-- RO table handler ---------------------------------------------------
++  |//-----------------------------------------------------------------------
++  |
++  |->ro_tab_error:
++  |  mov CARG1, SAVE_L
++  |  call extern lj_tab_readonly
++  |  jmp ->BC_RET_Z
++  |
++  |//-----------------------------------------------------------------------
+   |//-- Assertions ---------------------------------------------------------
+   |//-----------------------------------------------------------------------
+   |
+@@ -3782,6 +3798,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+     |  mov TAB:RB, [BASE+RB*8]
+     |  mov RC, [BASE+RC*8]
+     |  checktab TAB:RB, ->vmeta_tsetv
++    |  checkrotab TAB:RB->readonly, ->ro_tab_error
+     |
+     |  // Integer key?
+     |.if DUALNUM
+@@ -3833,6 +3850,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+     |  mov STR:RC, [KBASE+RC*8]
+     |  checktab TAB:RB, ->vmeta_tsets
+     |->BC_TSETS_Z:	// RB = GCtab *, RC = GCstr *
++    |  checkrotab TAB:RB->readonly, ->ro_tab_error
+     |  mov TMPRd, TAB:RB->hmask
+     |  and TMPRd, STR:RC->sid
+     |  imul TMPRd, #NODE
+-- 
+2.47.0
+
+diff --git a/src/vm_arm64.dasc b/src/vm_arm64.dasc
+index 4753df19..4cb482e6 100644
+--- a/src/vm_arm64.dasc
++++ b/src/vm_arm64.dasc
+@@ -291,6 +291,12 @@
+ |  blo target
+ |.endmacro
+ |
++|.macro checkrotab, reg, flag, target
++|  ldr reg, flag
++|  cmp reg, wzr
++|  bne target
++|.endmacro
++|
+ |.macro init_constants
+ |  movn TISNIL, #0
+ |  movz TISNUM, #(LJ_TISNUM>>1)&0xffff, lsl #48
+@@ -1076,6 +1082,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |.ffunc_2 setmetatable
+   |  // Fast path: no mt for table yet and not clearing the mt.
+   |  checktp TMP1, CARG1, LJ_TTAB, ->fff_fallback
++  |  checkrotab TMP0w, TAB:TMP1->readonly, ->ro_tab_error
+   |   ldr TAB:TMP0, TAB:TMP1->metatable
+   |  asr ITYPE, CARG2, #47
+   |   ldrb TMP2w, TAB:TMP1->marked
+@@ -2187,6 +2194,15 @@ static void build_subroutines(BuildCtx *ctx)
+   |//-- FFI helper functions -----------------------------------------------
+   |//-----------------------------------------------------------------------
+   |
++  |->ro_tab_error:
++  |  ldr CARG1, SAVE_L
++  |  bl extern lj_tab_readonly
++  |  b ->BC_RET_Z
++  |
++  |//-----------------------------------------------------------------------
++  |//-- FFI helper functions -----------------------------------------------
++  |//-----------------------------------------------------------------------
++  |
+   |// Handler for callback functions.
+   |// Saveregs already performed. Callback slot number in w9, g in x10.
+   |->vm_ffi_callback:
+@@ -3141,6 +3157,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+     |  ldr CARG2, [BASE, RB, lsl #3]
+     |   ldr TMP1, [BASE, RC, lsl #3]
+     |  checktab CARG2, ->vmeta_tsetv
++    |  checkrotab TMP0w, TAB:CARG2->readonly, ->ro_tab_error
+     |  checkint TMP1, >9		// Integer key?
+     |  ldr CARG3, TAB:CARG2->array
+     |   ldr CARG1w, TAB:CARG2->asize
+@@ -3186,6 +3203,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+     |  checktab CARG2, ->vmeta_tsets1
+     |->BC_TSETS_Z:
+     |  // TAB:CARG2 = GCtab *, STR:RC = GCstr *, RA = src
++    |  checkrotab TMP1w, TAB:CARG2->readonly, ->ro_tab_error
+     |  ldr TMP1w, TAB:CARG2->hmask
+     |   ldr TMP2w, STR:RC->sid
+     |    ldr NODE:CARG3, TAB:CARG2->node
